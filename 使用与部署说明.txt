@@ -1,0 +1,300 @@
+﻿============================================================
+EduBoard 使用与部署说明（Windows 安装版）
+============================================================
+
+一、安装前提
+============================================================
+
+当前安装包是“引导安装包”，不是完全离线安装包。安装过程中会下载 Node.js
+和 Python 依赖，因此需要：
+
+- 已安装 Node.js 22 或更高版本，并已加入 PATH；
+- 已安装 Python 3.11 或更高版本，并已加入 PATH；
+- 安装时可以访问 npm 和 PyPI 镜像或官方源；
+- 使用管理员权限运行安装程序，以注册服务和防火墙规则。
+
+如果目标机器不能联网，需要在打包阶段另外制作包含 node_modules、Python venv
+和对应平台原生模块的离线包；当前 setup.exe 不属于此类离线包。
+
+可选依赖（按需安装）：
+
+- Visual Studio Build Tools（C++ 桌面开发组件）
+  better-sqlite3 是原生模块，安装时需在本机编译。若 npm install 阶段报
+  node-gyp / MSBuild 相关错误，请安装 VS Build Tools：
+  https://visualstudio.microsoft.com/visual-cpp-build-tools/
+  安装时勾选“使用 C++ 的桌面开发”工作负载。
+
+- MiKTeX（数学公式渲染，manim 类演示必需）
+  数学函数、物理动画、分子结构这三类“manim 演示”技能（函数图像、导数、
+  斜抛/简谐/电磁场动画、分子 3D 等）的公式渲染依赖 pdflatex（TeX 编译器）。
+  安装：https://miktex.org/download
+  安装后需重启 EduBoard 服务（程序会自动检测常见安装路径并注入 PATH，
+  无需手动改环境变量）。
+  未安装时：这三类演示会渲染失败并给出错误提示，解析与其他演示不受影响。
+
+- ffmpeg（视频合成，manim 类演示必需）
+  manim 渲染 MP4 动画需要系统 ffmpeg 可执行文件。
+  安装：https://ffmpeg.org/download.html（或 winget install ffmpeg）
+  安装后加入 PATH 并重启 EduBoard 服务。
+  未安装时：同上，仅影响 manim 类演示。
+
+- pandoc（Word 文档导出）
+  如需使用“导出为 .docx”功能，需另装 pandoc 并加入 PATH。
+  下载：https://pandoc.org/installing.html
+  未安装时导出按钮会给出提示，不影响其他功能。
+
+
+二、安装完成后先做什么
+============================================================
+
+1. 打开 C:\EduBoard\.env，至少确认以下配置：
+
+   MODEL_PROVIDER=openai
+   MODEL_API_KEY=你的密钥
+   MODEL_BASE_URL=https://api.openai.com/v1
+   AGENT_MODEL=gpt-4o
+
+   也可以不在服务端保存 Key，由每位用户在网页设置中临时填写。
+
+   若使用 AgentRouter 类中转网关，还需加一行（这类网关在鉴权前校验客户端
+   指纹，普通请求会被拒绝；直连 OpenAI/DeepSeek 等官方端点请留空）：
+   MODEL_USER_AGENT=claude-cli/2.0.0 (external, cli)
+
+   重要：确认 SIDECAR_TOKEN 已设置为随机值（sidecar 与 server 的共享鉴权
+   token，安装时已自动生成；若为空，sidecar 将只允许本机回环访问）。
+
+   可选并发调优：
+   MAX_CONCURRENT_CHATS=6        # 同时进行的大模型对话上限（2 核机器 4-8）
+   RATE_LIMIT_PER_MINUTE=15      # 单 IP 每分钟对话/建会话上限
+   MANIM_MAX_RENDERERS=2         # manim 并发渲染数（超低配机器可改 1）
+
+2. 修改 .env 后，打开 services.msc，重启：
+
+   EduBoard-Backend
+
+   注意：模型相关配置（MODEL_PROVIDER / MODEL_API_KEY / MODEL_BASE_URL /
+   AGENT_MODEL / MODEL_USER_AGENT）保存后**立即生效**（无需重启服务）；
+   其余配置（端口、数据库路径、SIDECAR 地址、限速等）才需要重启
+   EduBoard-Backend。
+
+   修改 SIDECAR_PORT 等 Python 配置时，还需要重启：
+
+   EduBoard-Sidecar
+
+3. 本机访问：
+
+   http://127.0.0.1:17790
+
+4. 局域网访问：
+
+   http://本机局域网IP:17790
+
+   可在命令提示符运行 ipconfig，查看“IPv4 地址”。安装程序创建的防火墙
+   规则仅允许本地子网访问 17790，不会开放 Python sidecar 的 8791 端口。
+
+
+三、重要安全说明
+============================================================
+
+EduBoard 当前没有登录和用户权限系统。局域网内能够访问 17790 的设备可以创建
+会话、查看会话列表，并可能使用服务端配置的模型 Key。
+
+- 适合：可信家庭、办公室、教室局域网。
+- 不要：把 17790 端口直接映射到公网。
+- 公网使用：应通过反向代理增加 HTTPS，并建议增加身份认证或 IP 白名单。
+- Python sidecar 8791：安装版服务注册时会从 .env 读取 SIDECAR_HOST 与
+  SIDECAR_TOKEN（修改 .env 后需重跑安装程序或手动用 install-service.bat
+  重新注册服务才生效）。默认 127.0.0.1（回环）；若需监听所有网卡
+  （SIDECAR_HOST=0.0.0.0），**必须**同时设置 SIDECAR_TOKEN——未设置 token
+  时 sidecar 会拒绝以非回环地址启动（fail-closed 保护）。
+- 后端对对话/建会话按来源 IP 限速（默认 15 次/分钟），防止单人多会话
+  拖垮全局生成槽位。
+
+
+四、反向代理的基本原则
+============================================================
+
+EduBoard 前端使用 /api、/assets 等根路径。建议使用独立域名或子域名，例如：
+
+   http://eduboard.example.com
+   https://eduboard.example.com
+
+不建议直接部署在 https://example.com/eduboard/ 这样的子路径下，否则还需要
+额外重写前端资源和 API 根路径。
+
+反向代理目标统一为：
+
+   http://127.0.0.1:17790
+
+
+五、不替换现有 nginx.conf 的配置方法
+============================================================
+
+不要复制或替换用户现有的 nginx.conf。通常只需新增一个独立站点文件，让
+Nginx 按其现有 include 机制加载。
+
+常见位置：
+
+1. Debian / Ubuntu：
+
+   新建 /etc/nginx/sites-available/eduboard
+   再创建符号链接到 /etc/nginx/sites-enabled/eduboard
+
+2. CentOS / Rocky / AlmaLinux：
+
+   新建 /etc/nginx/conf.d/eduboard.conf
+
+3. 宝塔、1Panel、群晖等面板：
+
+   新建一个独立网站，在该网站的“反向代理”或“站点配置”中加入下方内容。
+   不要覆盖面板生成的全局 nginx.conf。
+
+4. Windows Nginx：
+
+   如果现有 nginx.conf 已有 `include conf.d/*.conf;`，只需新建：
+
+   conf\conf.d\eduboard.conf
+
+   如果没有任何 include 目录，则必须让现有配置加载新文件；这通常只需由
+   管理员在 http 块中增加一行 include，而不是替换整个 nginx.conf。
+
+
+六、Nginx 独立域名 HTTP 示例
+============================================================
+
+把下面内容保存为一个新的站点文件。请按实际情况修改 server_name。
+安装目录中的 eduboard.conf 提供了同等配置模板（含安全头/CSP/SSE 优化/
+静态资源缓存透传），可直接复制后修改，不要直接覆盖用户现有的 nginx.conf。
+
+server {
+    listen 80;
+    server_name eduboard.example.com;
+
+    client_max_body_size 30m;
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy no-referrer always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.bootcdn.net https://cdn.tailwindcss.com https://cdn.geogebra.org https://www.geogebra.org; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data: https:; connect-src 'self' https:; frame-src 'self' data: blob:; object-src 'none'; base-uri 'self'" always;
+
+    # 静态资源：缓存策略由后端 express.static 分层控制（构建产物 7d immutable、
+    # vendor 1h、index.html ETag 协商），此处不要加 expires 以免覆盖后端头。
+    location /assets/ {
+        proxy_pass http://127.0.0.1:17790;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:17790;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # SSE 流式响应优化：禁用缓冲和 chunked 编码，避免响应被 Nginx 攒批后才转发
+        proxy_buffering off;
+        chunked_transfer_encoding off;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
+
+如果只允许某个局域网网段访问，可在 server 级增加（所有 location 自动继承）：
+
+    allow 192.168.0.0/16;
+    allow 10.0.0.0/8;
+    allow 172.16.0.0/12;
+    deny all;
+
+按实际网络保留需要的网段，不要机械照抄全部网段。
+
+多站点共存：若同一台 Nginx 还代理其他项目（如监听 8080 的站点），不同站点
+必须用不同端口或 server_name 区分；本文件不声明 limit_req_zone/upstream 等
+http 级指令，与其他站点无共享冲突。
+
+
+七、保留后期 HTTPS 的方式
+============================================================
+
+以后增加 HTTPS 时，EduBoard 本身仍可保持 HTTP 监听 127.0.0.1:17790，由
+Nginx、Caddy 或面板负责证书和 TLS。代理目标无需改变。
+
+Nginx HTTPS 站点的 location / 内容与上面的 HTTP 示例相同，关键是保留：
+
+    proxy_set_header X-Forwarded-Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+可使用 Certbot、面板证书功能或已有证书。证书路径、TLS 版本和自动续期应
+沿用用户现有 Nginx 管理方式，本项目不要求替换其全局配置。
+
+
+八、检查和启用 Nginx 配置
+============================================================
+
+Linux 常用命令：
+
+   sudo nginx -t
+   sudo systemctl reload nginx
+
+不要在 nginx -t 失败时强制 reload。先根据提示修正新建的 EduBoard 站点文件。
+
+
+九、常见问题
+============================================================
+
+1. 本机能访问，局域网不能访问
+
+   - 确认 EduBoard-Backend 服务正在运行。
+   - 运行 netstat -ano | findstr :17790，确认监听地址为 0.0.0.0:17790。
+   - 确认访问的是部署机器的局域网 IPv4 地址。
+   - 检查 Windows 网络、防火墙及路由器的“客户端隔离”设置。
+
+2. Nginx 返回 502 Bad Gateway
+
+   - 在 Nginx 所在机器测试 http://127.0.0.1:17790/health。
+   - 如果 Nginx 与 EduBoard 不在同一台机器，proxy_pass 应改为 EduBoard
+     机器的局域网地址，并确保防火墙允许该代理服务器访问。
+
+3. 页面能打开，但发送消息返回 403 Origin not allowed
+
+   - 确认代理传递了 X-Forwarded-Host 和 X-Forwarded-Proto。
+   - 不要把外部 HTTPS 请求错误标记为 X-Forwarded-Proto http。
+   - 如果前端和 API 被拆成不同域名，需要在 .env 的 CORS_ORIGINS 中显式
+     添加前端完整来源，例如 https://board.example.com，然后重启后端。
+
+4. 修改端口后无法访问
+
+   Windows 安装器和快捷方式默认使用 17790。若修改 SERVER_PORT，还需同步
+   修改反向代理目标、防火墙规则和访问地址。
+
+5. 如何查看日志
+
+   C:\EduBoard\logs\backend-stdout.log
+   C:\EduBoard\logs\backend-stderr.log
+   C:\EduBoard\logs\sidecar-stdout.log
+   C:\EduBoard\logs\sidecar-stderr.log
+
+6. 下载的「动态网页」HTML 双击打开后 GeoGebra 不显示（超时）
+
+   浏览器把每个 file: 页面视为独立安全源，GeoGebra 的嵌套框架初始化会被
+   安全策略阻止（这是浏览器底层限制，无法通过代码绕过），页面会在数秒内
+   直接提示此原因而非等待超时。正确的本地打开方式（任选其一）：
+
+   方式一（推荐，无需安装任何软件）：白板工具栏点「⬇一键包」下载
+   Windows 一键运行包，把 .bat 文件发给对方，双击即可——它会自动启动
+   一个仅本机可见的本地服务并打开默认浏览器，关闭窗口即停止。需联网
+   加载 GeoGebra 运行时。
+
+   方式二：在文件所在目录执行 python -m http.server（需已安装 Python）
+   然后浏览器访问 http://localhost:8000/下载的文件名.html
+
+   或直接使用 EduBoard 白板页查看（推荐）。
+
+============================================================
